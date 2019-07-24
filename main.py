@@ -1,9 +1,8 @@
 import os
 import requests
-
-# from pprint import pprint
-
-TOKEN = '73eaea320bdc0d3299faa475c196cfea1c4df9da4c6d291633f9fe8f83c08c4de2a3abf89fbc3ed8a44e1'
+import json
+import time
+from pprint import pprint
 
 
 class User:
@@ -23,11 +22,13 @@ class User:
         response = requests.get(
             'https://api.vk.com/method/' + method, params=params
         )
+        time.sleep(0.34)
+        print('.')
         return response
 
     def get_groups(self):
         # Список групп, в которых состоит User
-        params = self.get_params()
+        params = self.get_params().copy()
         response = self.request('groups.get', params=params)
         return response.json()
 
@@ -39,50 +40,64 @@ class User:
         response = self.request('groups.getMembers', params=params)
         return response.json()
 
-    # def get_friends(self):
-    #     # Список друзей User
-    #     params = self.get_params()
-    #     response = self.request('friends.get', params=params)
-    #     return response.json()
+    def get_solo_groups(self):
+        # Сохраняем ID групп в файл, в которых нет друзей пользователя
+        for group in self.get_groups()['response']['items']:
+            if self.get_group_members(group)['response']['count'] == 0:
+                with open('groups.txt', 'a') as doc:
+                    doc.write(str(group))
+                    doc.write(',')
+        return doc
+
+    def get_group_info(self):
+        # Получаем требуемую информацию о сохраненных в файл группах
+        params = self.get_params().copy()
+        params['fields'] = 'members_count'
+        with open('groups.txt') as groups_list:
+            params['group_ids'] = groups_list.readline()
+        response = self.request('groups.getById', params=params)
+        return response.json()
+
+    def format_groups_info(self):
+        # Убираем лишние поля из информации о группах
+        groups_info = self.get_group_info()
+        for field in groups_info['response']:
+            field.pop('is_closed')
+            field.pop('photo_100')
+            field.pop('photo_200')
+            field.pop('photo_50')
+            field.pop('screen_name')
+            field.pop('type')
+        return groups_info
+
+    def save_groups_json(self):
+        # Сохраняем информацию в json
+        data = self.format_groups_info()
+        with open('groups.json', 'w', encoding='utf-8-sig') as file:
+            json.dump(data['response'], file, ensure_ascii=False, indent=4)
+
+    def get_results(self):
+        # Последовательное выполнение для получения итогового результата
+        self.get_solo_groups()
+        self.get_group_info()
+        self.format_groups_info()
+        self.save_groups_json()
 
 
-# def get_friends_ids(user):
-#     # Сохраняем ID друзей в документ
-#     for response in user.get_friends()['response']['items']:
-#         with open('friends.txt', 'a') as document:
-#             document.write(str(response))
-#             document.write('\n')
+def get_token():
+    # Получаем токен из файла
+    with open('token.txt') as token_vault:
+        for token in token_vault:
+            token_vault.readline()
+    return token
 
 
-def get_solo_groups(user):
-    # Получаем ID групп, в которых нет друзей пользователя
-
-    def get_group_ids(user):
-        # Сохраняем ID груп в документ
-        for response in user.get_groups()['response']['items']:
-            with open('groups.txt', 'a') as doc:
-                doc.write(str(response))
-                doc.write('\n')
-
-    def get_groups_ids_list():
-        # Получаем список из ID групп
-        ids_list = []
-        with open('groups.txt') as groups:
-            for line in groups:
-                line = line.lower().split()
-                ids_list.append(line)
-        return ids_list
-
-    get_group_ids(user)
-    for group in get_groups_ids_list():
-        group = str(group[0])
-        if user.get_group_members(group)['response']['count'] != 0:
-            pass
-        else:
-            print(group)
+def main():
+    eugen = User(get_token())
+    eugen.get_results()
+    os.remove('groups.txt')
+    print('done!')
 
 
-Eugen = User(TOKEN)
-get_solo_groups(Eugen)
-# os.remove('friends.txt')
-os.remove('groups.txt')
+if __name__ == '__main__':
+    main()
