@@ -2,23 +2,25 @@ import os
 import requests
 import json
 import time
-from pprint import pprint
+
+
+# from pprint import pprint
 
 
 class User:
 
-    def __init__(self, token):
-        self.token = token
+    def __init__(self, user_input):
+        self.uid = self.get_id(user_input)
 
     def get_params(self):
-        # Параметры для обращения к VK API
+        '''Параметры для обращения к vk api'''
         return {
-            'access_token': self.token,
-            'v': '5.54',
+            'access_token': get_token(),
+            'v': '5.89',
         }
 
     def request(self, method, params):
-        # Обращение к VK API
+        '''Обращаемся к vk api'''
         response = requests.get(
             'https://api.vk.com/method/' + method, params=params
         )
@@ -26,14 +28,39 @@ class User:
         print('.')
         return response
 
-    def get_groups(self):
-        # Список групп, в которых состоит User
+    def get_id(self, user_input):
+        '''
+        Проверяем ввод: screen_name или id
+        Если screen_name, то получаем id
+        '''
+        if user_input.isdigit():
+            return int(user_input)
+        else:
+            return self.get_id_from_sn(user_input)
+
+    def get_id_from_sn(self, user_input):
+        '''Получаем id по screen_name'''
         params = self.get_params().copy()
+        params['screen_name'] = user_input
+        response = self.request('utils.resolveScreenName', params=params)
+        return response.json()['response']['object_id']
+
+    def get_user_cred(self):
+        '''Получаем информацию о пользователе'''
+        params = self.get_params().copy()
+        params['user_ids'] = self.uid
+        response = self.request('users.get', params=params)
+        return response.json()
+
+    def get_groups(self):
+        '''Получаем список групп, в которых состоит User'''
+        params = self.get_params().copy()
+        params['user_id'] = self.uid
         response = self.request('groups.get', params=params)
         return response.json()
 
     def get_group_members(self, group_id):
-        # Список членов групп, в которых состоит User с фильтром по друзьям
+        '''Получаем список членов групп, в которых состоит User с фильтром по друзьям'''
         params = self.get_params().copy()
         params['group_id'] = group_id
         params['filter'] = 'friends'
@@ -41,16 +68,19 @@ class User:
         return response.json()
 
     def get_solo_groups(self):
-        # Сохраняем ID групп в файл, в которых нет друзей пользователя
+        '''
+        Сохраняем id групп, в которых нет друзей User-а, в файл
+        Запускаем дальнейшее выполнение программы
+        '''
         for group in self.get_groups()['response']['items']:
             if self.get_group_members(group)['response']['count'] == 0:
                 with open('groups.txt', 'a') as doc:
                     doc.write(str(group))
                     doc.write(',')
-        return doc
+            self.save_groups_json()
 
     def get_group_info(self):
-        # Получаем требуемую информацию о сохраненных в файл группах
+        '''Получаем подробную информацию о сохраненных в файл группах'''
         params = self.get_params().copy()
         params['fields'] = 'members_count'
         with open('groups.txt') as groups_list:
@@ -59,7 +89,7 @@ class User:
         return response.json()
 
     def format_groups_info(self):
-        # Убираем лишние поля из информации о группах
+        '''Убираем лишние поля из полученной информации о группах'''
         groups_info = self.get_group_info()
         for field in groups_info['response']:
             field.pop('is_closed')
@@ -71,32 +101,60 @@ class User:
         return groups_info
 
     def save_groups_json(self):
-        # Сохраняем информацию в json
+        '''Сохраняем информацию о группах в json'''
         data = self.format_groups_info()
         with open('groups.json', 'w', encoding='utf-8-sig') as file:
             json.dump(data['response'], file, ensure_ascii=False, indent=4)
 
-    def get_results(self):
-        # Последовательное выполнение для получения итогового результата
-        self.get_solo_groups()
-        self.get_group_info()
-        self.format_groups_info()
-        self.save_groups_json()
-
 
 def get_token():
-    # Получаем токен из файла
+    '''Получаем токен из файла'''
     with open('token.txt') as token_vault:
         for token in token_vault:
             token_vault.readline()
     return token
 
 
+def clear_json():
+    '''Удаляем файл, если существует'''
+    try:
+        os.remove('groups.json')
+    except:
+        pass
+
+
+def clear_txt():
+    '''Удаляем временный файл'''
+    try:
+        os.remove('groups.txt')
+    except:
+        pass
+
+
+def check_is_closed(user):
+    '''
+    Проверяем закрыт ли профиль
+    Если открыт, то запускаем выполнение программы
+    '''
+    if user.get_user_cred()['response'][0]['is_closed'] == True:
+        print('К сожалению, профиль пользователя закрыт :(')
+        print()
+    else:
+        user.get_solo_groups()
+
+
 def main():
-    eugen = User(get_token())
-    eugen.get_results()
-    os.remove('groups.txt')
-    print('done!')
+    start = time.time()
+
+    clear_json()
+    command = input('Введите screen_name или id пользователя: ')
+    user = User(command)
+    check_is_closed(user)
+    clear_txt()
+
+    finish = time.time()
+    exec_time = finish - start
+    print("Готово! Заняло " + str(exec_time) + " секунд.")
 
 
 if __name__ == '__main__':
