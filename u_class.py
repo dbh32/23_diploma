@@ -14,7 +14,7 @@ def get_token():
 class User:
 
     def __init__(self, user_input):
-        self.uid = self.get_id(user_input)
+        self.id = self.check_if_closed(user_input)
 
     def get_params(self):
         '''Параметры для обращения к vk api'''
@@ -25,76 +25,98 @@ class User:
 
     def request(self, method, params):
         '''Обращаемся к vk api'''
+        time.sleep(0.34)
         response = requests.get(
             'https://api.vk.com/method/' + method, params=params
         )
-        time.sleep(0.34)
         print('.')
         return response
 
-    def get_id(self, user_input):
-        '''
-        Проверяем ввод: screen_name или id
-        Если screen_name, то получаем id
-        '''
-        if user_input.isdigit():
-            return int(user_input)
-        else:
-            return self.get_id_from_sn(user_input)
+    def check_if_closed(self, uid):
+        '''Проверяем, что профиль доступен'''
+        try:
+            for status in self.get_user_info(uid)['response']:
+                if ('is_closed', True) in status.items():
+                    print(f"Страница пользователя с id{status['id']} закрыта")
+                elif ('deactivated', 'deleted') in status.items():
+                    print(f"Страница пользователя с id{status['id']} удалена")
+                elif ('deactivated', 'banned') in status.items():
+                    print(f"Страница пользователя с id{status['id']} заблокирована")
+                elif ('is_closed', False) in status.items():
+                    return status['id']
+                else:
+                    print('Неожиданно...')
+                    print(self.get_user_info(uid))
+        except KeyError:
+            print(self.get_user_info(uid))
+            pass
 
-    def get_id_from_sn(self, user_input):
-        '''Получаем id по screen_name'''
-        params = self.get_params().copy()
-        params['screen_name'] = user_input
-        response = self.request('utils.resolveScreenName', params=params)
-        return response.json()['response']['object_id']
-
-    def get_user_cred(self):
+    def get_user_info(self, uid):
         '''Получаем информацию о пользователе'''
         params = self.get_params().copy()
-        params['user_ids'] = self.uid
+        params['user_ids'] = uid
         response = self.request('users.get', params=params)
         return response.json()
 
-    def get_groups(self):
-        '''Получаем список групп, в которых состоит User'''
+    def get_groups(self, uid):
+        '''Получаем перечень групп, в которых состоит User'''
         params = self.get_params().copy()
-        params['user_id'] = self.uid
+        params['user_id'] = uid
         response = self.request('groups.get', params=params)
         return response.json()
 
-    def get_group_members(self, group_id):
-        '''Получаем список членов групп, в которых состоит User с фильтром по друзьям'''
+    def get_groups_set(self, uid):
+        '''Получаем множество групп пользователя'''
+        groups_set = set()
+        try:
+            for group in self.get_groups(uid)['response']['items']:
+                groups_set.add(group)
+        except KeyError:
+            print(self.get_groups(uid))
+            pass
+        return groups_set
+
+    def get_friends(self):
+        '''Получаем список ID друзей'''
         params = self.get_params().copy()
-        params['group_id'] = group_id
-        params['filter'] = 'friends'
-        response = self.request('groups.getMembers', params=params)
+        params['user_id'] = self.id
+        response = self.request('friends.get', params=params)
         return response.json()
 
-    def get_solo_groups(self):
-        '''
-        Сохраняем id групп, в которых нет друзей User-а, в файл
-        Запускаем дальнейшее выполнение программы
-        '''
-        for group in self.get_groups()['response']['items']:
-            if self.get_group_members(group)['response']['count'] == 0:
-                with open('groups.txt', 'a') as doc:
-                    doc.write(str(group))
-                    doc.write(',')
-            self.save_groups_json()
+    def get_available_friends(self):
+        '''Формируем список друзей с открытым профилем'''
+        available_friends = []
+        for friend in self.get_friends()['response']['items']:
+            available_friends.append(self.check_if_closed(friend))
+        return available_friends
 
-    def get_group_info(self):
-        '''Получаем подробную информацию о сохраненных в файл группах'''
+    def get_friends_groups_set(self):
+        '''Получаем множество групп всех друзей'''
+        friends_groups_set = set()
+        for friend in self.get_available_friends():
+            friends_groups_set.update(self.get_groups_set(friend))
+        return friends_groups_set
+
+    def get_groups_wo_friends(self):
+        '''Множество групп, в которых нет друзей'''
+        result = self.get_groups_set(self.id).difference(
+            self.get_friends_groups_set())
+        # print('Группы без друзей:')
+        # pprint(result)
+        return result
+
+    def get_groups_wo_friends_info(self):
+        '''Получаем подробную информацию о группах из множества без друзей'''
         params = self.get_params().copy()
         params['fields'] = 'members_count'
-        with open('groups.txt') as groups_list:
-            params['group_ids'] = groups_list.readline()
+        params['group_ids'] = str(self.get_groups_wo_friends())[1:-2]
         response = self.request('groups.getById', params=params)
         return response.json()
 
     def format_groups_info(self):
         '''Убираем лишние поля из полученной информации о группах'''
-        groups_info = self.get_group_info()
+        groups_info = self.get_groups_wo_friends_info()
+        # pprint(groups_info)
         for field in groups_info['response']:
             field.pop('is_closed')
             field.pop('photo_100')
@@ -104,19 +126,8 @@ class User:
             field.pop('type')
         return groups_info
 
-    def save_groups_json(self):
+    def get_results_json(self):
         '''Сохраняем информацию о группах в json'''
         data = self.format_groups_info()
         with open('groups.json', 'w', encoding='utf-8-sig') as file:
             json.dump(data['response'], file, ensure_ascii=False, indent=4)
-
-    def check_is_closed(self):
-        '''
-        Проверяем закрыт ли профиль
-        Если открыт, то запускаем выполнение программы
-        '''
-        if self.get_user_cred()['response'][0]['is_closed']:
-            print('К сожалению, профиль пользователя закрыт :(')
-            print()
-        else:
-            self.get_solo_groups()
