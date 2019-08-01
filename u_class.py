@@ -101,33 +101,39 @@ class User:
         '''Множество групп, в которых нет друзей'''
         result = self.get_groups_set(self.id).difference(
             self.get_friends_groups_set())
-        # print('Группы без друзей:')
-        # pprint(result)
         return result
 
     def get_groups_wo_friends_info(self):
         '''Получаем подробную информацию о группах из множества без друзей'''
-        params = self.get_params().copy()
-        params['fields'] = 'members_count'
-        params['group_ids'] = str(self.get_groups_wo_friends())[1:-2]
-        response = self.request('groups.getById', params=params)
-        return response.json()
+        if len(self.get_groups_wo_friends()) == 0:
+            pass
+        else:
+            params = self.get_params().copy()
+            params['fields'] = 'members_count'
+            params['group_ids'] = str(self.get_groups_wo_friends())[1:-2]
+            response = self.request('groups.getById', params=params)
+            return response.json()
 
     def format_groups_info(self):
         '''Убираем лишние поля из полученной информации о группах'''
-        groups_info = self.get_groups_wo_friends_info()
-        # pprint(groups_info)
-        for field in groups_info['response']:
-            field.pop('is_closed')
-            field.pop('photo_100')
-            field.pop('photo_200')
-            field.pop('photo_50')
-            field.pop('screen_name')
-            field.pop('type')
-        return groups_info
+        if len(self.get_groups_wo_friends()) == 0:
+            pass
+        else:
+            groups_info = self.get_groups_wo_friends_info()
+            for field in groups_info['response']:
+                field.pop('is_closed')
+                field.pop('photo_100')
+                field.pop('photo_200')
+                field.pop('photo_50')
+                field.pop('screen_name')
+                field.pop('type')
+            return groups_info
 
     def get_results_json(self):
         '''Сохраняем информацию о группах в json'''
-        data = self.format_groups_info()
-        with open('groups.json', 'w', encoding='utf-8-sig') as file:
-            json.dump(data['response'], file, ensure_ascii=False, indent=4)
+        if len(self.get_groups_wo_friends()) == 0:
+            print('Групп без друзей нет :(')
+        else:
+            data = self.format_groups_info()
+            with open('groups.json', 'w', encoding='utf-8-sig') as file:
+                json.dump(data['response'], file, ensure_ascii=False, indent=4)
