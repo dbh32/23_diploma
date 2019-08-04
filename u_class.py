@@ -1,6 +1,5 @@
-import requests
-import json
-import time
+import requests, json
+from retry import retry
 
 
 def get_token():
@@ -25,7 +24,6 @@ class User:
 
     def request(self, method, params):
         '''Обращаемся к vk api'''
-        time.sleep(0.34)
         response = requests.get(
             'https://api.vk.com/method/' + method, params=params
         )
@@ -34,22 +32,15 @@ class User:
 
     def check_if_closed(self, uid):
         '''Проверяем, что профиль доступен'''
-        try:
-            for status in self.get_user_info(uid)['response']:
-                if ('is_closed', True) in status.items():
-                    print(f"Страница пользователя с id{status['id']} закрыта")
-                elif ('deactivated', 'deleted') in status.items():
-                    print(f"Страница пользователя с id{status['id']} удалена")
-                elif ('deactivated', 'banned') in status.items():
-                    print(f"Страница пользователя с id{status['id']} заблокирована")
-                elif ('is_closed', False) in status.items():
-                    return status['id']
-                else:
-                    print('Неожиданно...')
-                    print(self.get_user_info(uid))
-        except KeyError:
-            print(self.get_user_info(uid))
-            pass
+        response = self.get_user_info_retry(uid)[0]
+        if ('is_closed', True) in response.items():
+            print(f"Страница пользователя с id{response['id']} закрыта")
+        elif ('deactivated', 'deleted') in response.items():
+            print(f"Страница пользователя с id{response['id']} удалена")
+        elif ('deactivated', 'banned') in response.items():
+            print(f"Страница пользователя с id{response['id']} заблокирована")
+        elif ('is_closed', False) in response.items():
+            return response['id']
 
     def get_user_info(self, uid):
         '''Получаем информацию о пользователе'''
@@ -58,6 +49,11 @@ class User:
         response = self.request('users.get', params=params)
         return response.json()
 
+    @retry(KeyError, delay=1, backoff=2, tries=5)
+    def get_user_info_retry(self, uid):
+        self.get_user_info(uid)
+        return self.get_user_info(uid)['response']
+
     def get_groups(self, uid):
         '''Получаем перечень групп, в которых состоит User'''
         params = self.get_params().copy()
@@ -65,15 +61,16 @@ class User:
         response = self.request('groups.get', params=params)
         return response.json()
 
+    @retry(KeyError, delay=1, backoff=2, tries=5)
+    def get_groups_retry(self, uid):
+        self.get_groups(uid)
+        return self.get_groups(uid)['response']['items']
+
     def get_groups_set(self, uid):
         '''Получаем множество групп пользователя'''
         groups_set = set()
-        try:
-            for group in self.get_groups(uid)['response']['items']:
-                groups_set.add(group)
-        except KeyError:
-            print(self.get_groups(uid))
-            pass
+        for group in self.get_groups_retry(uid):
+            groups_set.add(group)
         return groups_set
 
     def get_friends(self):
